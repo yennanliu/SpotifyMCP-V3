@@ -1,0 +1,10 @@
+[project]
+name = "spotify-mcp"
+version = "0.1.0"
+description = "A minimal FastMCP server for the Spotify catalog"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=4.0.5",
+    "httpx>=0.28.1",
+]
