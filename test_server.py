@@ -5,6 +5,7 @@ real credentials.
 """
 
 import time
+from urllib.parse import unquote
 
 import httpx
 import pytest
@@ -16,6 +17,9 @@ import server
 
 TOKEN_ROUTE = "https://accounts.spotify.com/api/token"
 API = "https://api.spotify.com/v1"
+DEEZER = "https://api.deezer.com"
+LASTFM = "https://ws.audioscrobbler.com/2.0/"
+PLAYLIST = "1sKQOPBrwSLv0Ul80U8foE"
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +27,7 @@ def credentials(monkeypatch):
     """Give every test fake credentials and a cleared token cache."""
     monkeypatch.setenv("SPOTIFY_CLIENT_ID", "test-id")
     monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "test-secret")
+    monkeypatch.delenv("LASTFM_API_KEY", raising=False)
     monkeypatch.setattr(server, "_token", None)
     monkeypatch.setattr(server, "_token_expires_at", 0.0)
 
@@ -64,6 +69,74 @@ SIMPLIFIED_TRACK = {
     "duration_ms": 284_000,
     "external_urls": {"spotify": "https://open.spotify.com/track/t2"},
 }
+
+
+def track(track_id, artist, artist_id=None):
+    """A full track by one artist."""
+    return {
+        **TRACK,
+        "type": "track",
+        "id": track_id,
+        "name": f"{artist} song {track_id}",
+        "artists": [{"name": artist, "id": artist_id or f"id-{artist}"}],
+    }
+
+
+def mock_playlist(respx_mock, tracks, playlist_id=PLAYLIST):
+    """Serve a one-page playlist, plus the batch artist lookup for its genres."""
+    respx_mock.get(f"{API}/playlists/{playlist_id}/tracks").mock(
+        return_value=httpx.Response(
+            200, json={"items": [{"track": t} for t in tracks], "next": None}
+        )
+    )
+    respx_mock.get(f"{API}/artists").mock(
+        return_value=httpx.Response(200, json={"artists": [{"genres": ["k-pop"]}]})
+    )
+
+
+def mock_deezer(respx_mock, related):
+    """Fake Deezer, where `related` maps an artist name to its related artists."""
+    ids = {name: str(i) for i, name in enumerate(related, start=1)}
+
+    def search(request):
+        q = request.url.params["q"]
+        data = [{"id": int(ids[q]), "name": q}] if q in ids else []
+        return httpx.Response(200, json={"data": data})
+
+    def related_artists(request, artist_id):
+        name = next(n for n, i in ids.items() if i == artist_id)
+        return httpx.Response(200, json={"data": [{"name": n} for n in related[name]]})
+
+    respx_mock.get(f"{DEEZER}/search/artist").mock(side_effect=search)
+    respx_mock.get(url__regex=rf"{DEEZER}/artist/(?P<artist_id>\d+)/related").mock(
+        side_effect=related_artists
+    )
+
+
+def mock_spotify_artists(respx_mock, genres=None, renamed=None):
+    """Spotify artist search and top tracks for any name.
+
+    `genres` maps a name to its genres; `renamed` maps a name to the different
+    artist Spotify's search returns instead, to simulate a name collision.
+    """
+    genres, renamed = genres or {}, renamed or {}
+
+    def search(request):
+        q = request.url.params["q"]
+        name = renamed.get(q, q)
+        artist = {"id": f"id-{name}", "name": name, "genres": genres.get(q, [])}
+        return httpx.Response(200, json={"artists": {"items": [artist]}})
+
+    def top_tracks(request, artist_id):
+        name = unquote(artist_id).removeprefix("id-")
+        return httpx.Response(
+            200, json={"tracks": [track(f"{name}-1", name), track(f"{name}-2", name)]}
+        )
+
+    respx_mock.get(f"{API}/search").mock(side_effect=search)
+    respx_mock.get(url__regex=rf"{API}/artists/(?P<artist_id>[^/]+)/top-tracks").mock(
+        side_effect=top_tracks
+    )
 
 
 class TestAuth:
@@ -221,6 +294,186 @@ class TestTools:
             server.get_track("t1")
 
 
+class TestPlaylists:
+    @pytest.mark.parametrize(
+        "playlist",
+        [
+            "https://open.spotify.com/playlist/1sKQOPBrwSLv0Ul80U8foE?si=c642c2fa",
+            "spotify:playlist:1sKQOPBrwSLv0Ul80U8foE",
+            "1sKQOPBrwSLv0Ul80U8foE",
+        ],
+    )
+    def test_accepts_url_uri_or_id(self, playlist):
+        assert server._playlist_id(playlist) == "1sKQOPBrwSLv0Ul80U8foE"
+
+    def test_rejects_something_else(self):
+        with pytest.raises(ToolError, match="Not a Spotify playlist"):
+            server._playlist_id("https://open.spotify.com/album/6dVIqQ8qmQ5GBnJ9shOYGE")
+
+    @respx.mock
+    def test_pages_through_and_skips_non_tracks(self, respx_mock):
+        mock_token(respx_mock)
+        episode = {**track("e1", "Podcast"), "type": "episode"}
+        local = {**track(None, "Local"), "type": "track"}
+        route = respx_mock.get(f"{API}/playlists/{PLAYLIST}/tracks").mock(
+            side_effect=[
+                httpx.Response(
+                    200,
+                    json={
+                        "items": [{"track": track("t1", "A")}, {"track": None}],
+                        "next": "page-2",
+                    },
+                ),
+                httpx.Response(
+                    200,
+                    json={
+                        "items": [
+                            {"track": episode},
+                            {"track": local},
+                            {"track": track("t2", "B")},
+                        ],
+                        "next": None,
+                    },
+                ),
+            ]
+        )
+        tracks = server.get_playlist_tracks(PLAYLIST)
+        assert [t["id"] for t in tracks] == ["t1", "t2"]
+        assert route.calls[1].request.url.params["offset"] == "1"
+
+
+class TestRecommendations:
+    @respx.mock
+    def test_ranks_shared_neighbours_first_and_skips_playlist_artists(
+        self, respx_mock
+    ):
+        mock_token(respx_mock)
+        mock_playlist(respx_mock, [track("t1", "IVE"), track("t2", "aespa")])
+        mock_deezer(
+            respx_mock,
+            {
+                # LE SSERAFIM is related to both seeds; aespa is already on the
+                # playlist, so it must not come back.
+                "IVE": ["aespa", "LE SSERAFIM", "ITZY"],
+                "aespa": ["LE SSERAFIM", "NMIXX"],
+            },
+        )
+        mock_spotify_artists(respx_mock)
+
+        picks = server.recommend_from_playlist(PLAYLIST, limit=3)
+
+        # NMIXX is 2nd of aespa's 2 (0.5); ITZY is 3rd of IVE's 3 (0.33).
+        assert [p["artists"] for p in picks] == [["LE SSERAFIM"], ["NMIXX"], ["ITZY"]]
+        assert picks[0]["because"] == ["aespa", "IVE"]
+        assert picks[0]["id"] == "LE SSERAFIM-1"
+
+    @respx.mock
+    def test_shared_genres_rank_higher(self, respx_mock):
+        mock_token(respx_mock)
+        mock_playlist(respx_mock, [track("t1", "IVE")])
+        # Without the boost Coldplay (1.0) outranks ITZY (0.75); with it, ITZY
+        # (0.75 * 1.5) wins.
+        mock_deezer(respx_mock, {"IVE": ["Coldplay", "ITZY", "NMIXX", "STAYC"]})
+        mock_spotify_artists(respx_mock, genres={"ITZY": ["k-pop"]})
+
+        picks = server.recommend_from_playlist(PLAYLIST, limit=2)
+
+        assert [p["artists"] for p in picks] == [["ITZY"], ["Coldplay"]]
+
+    @respx.mock
+    def test_skips_name_collisions_on_spotify(self, respx_mock):
+        mock_token(respx_mock)
+        mock_playlist(respx_mock, [track("t1", "IVE")])
+        mock_deezer(respx_mock, {"IVE": ["ITZY", "NMIXX"]})
+        mock_spotify_artists(respx_mock, renamed={"ITZY": "ITZY Tribute Band"})
+
+        picks = server.recommend_from_playlist(PLAYLIST, limit=2)
+
+        assert [p["artists"] for p in picks] == [["NMIXX"]]
+
+    @respx.mock
+    def test_one_cluster_cannot_fill_the_list(self, respx_mock):
+        mock_token(respx_mock)
+        mock_playlist(respx_mock, [track("t1", "IVE"), track("t2", "Night Tempo")])
+        mock_deezer(
+            respx_mock,
+            {
+                "IVE": ["ITZY", "NMIXX", "aespa", "STAYC"],
+                "Night Tempo": ["Mariya Takeuchi"],
+            },
+        )
+        mock_spotify_artists(respx_mock)
+
+        picks = server.recommend_from_playlist(PLAYLIST, limit=3)
+
+        # IVE has one track on the playlist, so it may lead to two picks.
+        assert [p["artists"] for p in picks] == [
+            ["ITZY"],
+            ["Mariya Takeuchi"],
+            ["NMIXX"],
+        ]
+
+    @respx.mock
+    def test_skips_top_tracks_already_on_the_playlist(self, respx_mock):
+        mock_token(respx_mock)
+        mock_playlist(respx_mock, [track("t1", "IVE"), track("ITZY-1", "Someone")])
+        mock_deezer(respx_mock, {"IVE": ["ITZY"], "Someone": []})
+        mock_spotify_artists(respx_mock)
+
+        [pick] = server.recommend_from_playlist(PLAYLIST, limit=1)
+
+        assert pick["id"] == "ITZY-2"
+
+    @respx.mock
+    def test_falls_back_to_lastfm_when_deezer_is_down(self, respx_mock, monkeypatch):
+        monkeypatch.setenv("LASTFM_API_KEY", "fm-key")
+        mock_token(respx_mock)
+        mock_playlist(respx_mock, [track("t1", "IVE")])
+        respx_mock.get(f"{DEEZER}/search/artist").mock(
+            side_effect=httpx.ConnectError("down")
+        )
+        lastfm = respx_mock.get(LASTFM).mock(
+            return_value=httpx.Response(
+                200, json={"similarartists": {"artist": [{"name": "ITZY"}]}}
+            )
+        )
+        mock_spotify_artists(respx_mock)
+
+        [pick] = server.recommend_from_playlist(PLAYLIST, limit=1)
+
+        assert pick["artists"] == ["ITZY"]
+        assert lastfm.calls[0].request.url.params["api_key"] == "fm-key"
+
+    @respx.mock
+    def test_lastfm_is_skipped_without_a_key(self, respx_mock):
+        mock_token(respx_mock)
+        mock_playlist(respx_mock, [track("t1", "IVE")])
+        mock_deezer(respx_mock, {"IVE": ["ITZY"]})
+        mock_spotify_artists(respx_mock)
+        lastfm = respx_mock.get(LASTFM)
+
+        server.recommend_from_playlist(PLAYLIST, limit=1)
+
+        assert not lastfm.called
+
+    @respx.mock
+    def test_no_similar_artists_is_a_clear_error(self, respx_mock):
+        mock_token(respx_mock)
+        mock_playlist(respx_mock, [track("t1", "Unknown Artist")])
+        mock_deezer(respx_mock, {})
+
+        with pytest.raises(ToolError, match="similar artists"):
+            server.recommend_from_playlist(PLAYLIST)
+
+    @respx.mock
+    def test_empty_playlist_is_a_clear_error(self, respx_mock):
+        mock_token(respx_mock)
+        mock_playlist(respx_mock, [])
+
+        with pytest.raises(ToolError, match="no tracks"):
+            server.recommend_from_playlist(PLAYLIST)
+
+
 class TestMCPServer:
     """Exercise the server the way a real MCP client would."""
 
@@ -235,6 +488,8 @@ class TestMCPServer:
             "get_artist",
             "get_artist_top_tracks",
             "get_album_tracks",
+            "get_playlist_tracks",
+            "recommend_from_playlist",
         }
 
     @pytest.mark.asyncio

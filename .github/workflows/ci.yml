@@ -41,7 +41,7 @@ jobs:
               async with Client(server.mcp) as client:
                   tools = await client.list_tools()
               print(f'{len(tools)} tools registered')
-              assert len(tools) == 6
+              assert len(tools) == 8
 
           asyncio.run(main())
           "
