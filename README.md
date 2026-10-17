@@ -135,6 +135,74 @@ Or the equivalent entry in `claude_desktop_config.json`:
 }
 ```
 
+## Use from ChatGPT
+
+ChatGPT can't launch a local stdio server; it connects only to a public HTTPS URL. So
+serve over HTTP and put a temporary tunnel in front of it. This needs a paid ChatGPT plan
+with Developer mode, on the web.
+
+1. Serve over HTTP:
+
+   ```bash
+   SPOTIFY_CLIENT_ID=... SPOTIFY_CLIENT_SECRET=... \
+     uv run fastmcp run server.py:mcp --transport http --port 8000
+   ```
+
+2. In a second terminal, open a tunnel ([cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/),
+   `brew install cloudflared`; no account needed):
+
+   ```bash
+   cloudflared tunnel --url http://127.0.0.1:8000
+   ```
+
+   It prints a URL like `https://<random-words>.trycloudflare.com`. Check that it
+   reaches the server before going further. An HTTP `200` means it does:
+
+   ```bash
+   curl -s -o /dev/null -w "%{http_code}\n" -X POST https://<random-words>.trycloudflare.com/mcp \
+     -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"check","version":"0"}}}'
+   ```
+
+3. In ChatGPT, open **Settings → Apps & Connectors → Advanced settings** and turn on
+   **Developer mode**.
+4. In **Apps & Connectors**, click **Create** and fill in:
+   - **Connection:** *Server URL*, set to the tunnel URL **with `/mcp` appended**
+   - **Authentication:** *No authentication*
+   - Tick the box acknowledging that custom MCP servers carry risk, then click **Create**.
+     ChatGPT should list the six tools.
+5. In a new chat, click **+**, choose **Developer mode**, and turn the connector on.
+   ChatGPT asks you to approve each tool call.
+
+Things to know:
+
+- **Anyone with the URL can call the server**, since it has no auth. They get read-only
+  catalog search through your app. They can't reach your Spotify account or see the
+  client secret. Don't share the URL, and stop the tunnel when you're done.
+- **A quick tunnel gets a new URL on every restart**, so you have to update the
+  connector in ChatGPT each time.
+
+## Example prompts
+
+These work in any MCP host (Claude Code, Claude Desktop or ChatGPT). Together they cover
+all six tools and the error paths.
+
+| Prompt | Exercises |
+| --- | --- |
+| *Search Spotify for 3 tracks called "Yellow".* | `search_tracks` |
+| *Find the artist Radiohead and tell me their follower count and genres.* | `search_artists` |
+| *What are Radiohead's top 5 tracks in the US? And in Taiwan?* | `search_artists` → `get_artist_top_tracks` with `market` |
+| *Look up track `70LcF31zb1H0PyJoS1Sx1r`: name, album and length in minutes.* | `get_track` |
+| *Get artist `4Z8W4fKeB5YxbusRsdQVPb` and summarise them.* | `get_artist` |
+| *List the full tracklist of OK Computer (album `6dVIqQ8qmQ5GBnJ9shOYGE`).* | `get_album_tracks` |
+| *找周杰倫最熱門的 3 首歌，並列出每首歌所屬的專輯。* | Non-ASCII queries, chained calls |
+| *Find Daft Punk's most popular track, then show me the rest of the album it's on.* | Multi-step: search → top tracks → album |
+| *Look up track `notarealid`.* | Error path: should report `Spotify returned 400: Invalid base62 id` |
+| *Search for 100 tracks by Taylor Swift.* | `limit` above 50: ChatGPT should either cap it at 50 or relay the validation error |
+
+Playback, playlists and "my library" prompts are expected to fail, because Phase 1 only
+has access to the public catalog.
+
 ## CI
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the test suite on Python
