@@ -21,7 +21,8 @@ and are out of scope here.
 | `get_album_tracks(album_id, limit=50)` | An album's track list |
 
 Responses are flattened to small summary dicts rather than Spotify's raw payloads, so
-image arrays and pagination cursors stay out of the model's context.
+image arrays and pagination cursors stay out of the model's context. `limit` must be
+1–50, Spotify's own page-size cap; out-of-range values are rejected before any request.
 
 ## Setup
 
@@ -93,7 +94,9 @@ print(json.dumps(server.search_tracks('radiohead', limit=3), indent=2))
 ```
 
 If the credentials are missing you get a clear error naming the variables to set,
-rather than a 401 from Spotify.
+rather than a 401 from Spotify. Errors from Spotify itself (bad credentials, an
+invalid ID) come back with Spotify's own explanation, e.g.
+`Spotify returned 400: invalid id`.
 
 ### 4. The FastMCP inspector
 
@@ -142,7 +145,7 @@ and asserts all six tools register. No secrets are needed — the tests are full
 
 ```
 server.py       the MCP server (six tools + token caching)
-test_server.py  16 tests, all offline
+test_server.py  22 tests, all offline
 pyproject.toml  deps and pytest config, managed by uv
 ```
 

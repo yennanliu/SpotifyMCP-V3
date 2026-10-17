@@ -97,7 +97,18 @@ class TestAuth:
 
     def test_missing_credentials_is_a_clear_error(self, monkeypatch):
         monkeypatch.delenv("SPOTIFY_CLIENT_ID")
-        with pytest.raises(RuntimeError, match="SPOTIFY_CLIENT_ID"):
+        with pytest.raises(ToolError, match="SPOTIFY_CLIENT_ID"):
+            server._get_token()
+
+    @respx.mock
+    def test_bad_credentials_surface_spotifys_reason(self, respx_mock):
+        respx_mock.post(TOKEN_ROUTE).mock(
+            return_value=httpx.Response(
+                400,
+                json={"error": "invalid_client", "error_description": "Invalid client"},
+            )
+        )
+        with pytest.raises(ToolError, match="400: Invalid client"):
             server._get_token()
 
 
@@ -166,25 +177,48 @@ class TestTools:
         assert route.calls[0].request.url.params["market"] == "GB"
 
     @respx.mock
-    def test_get_album_tracks_handles_simplified_tracks(self, respx_mock):
-        """Album tracks omit `album` and `popularity`; summarising must not crash."""
+    def test_get_album_tracks_fills_in_the_album(self, respx_mock):
+        """Album tracks omit `album` and `popularity`; neither should come back null."""
         mock_token(respx_mock)
-        respx_mock.get(f"{API}/albums/al1/tracks").mock(
-            return_value=httpx.Response(200, json={"items": [SIMPLIFIED_TRACK]})
+        respx_mock.get(f"{API}/albums/al1").mock(
+            return_value=httpx.Response(
+                200,
+                json={"name": "OK Computer", "tracks": {"items": [SIMPLIFIED_TRACK]}},
+            )
         )
         [track] = server.get_album_tracks("al1")
         assert track["name"] == "Airbag"
-        assert track["album"] is None
-        assert track["popularity"] is None
+        assert track["album"] == "OK Computer"
+        assert "popularity" not in track
 
     @respx.mock
-    def test_http_errors_propagate(self, respx_mock):
+    def test_get_album_tracks_honours_limit(self, respx_mock):
+        mock_token(respx_mock)
+        respx_mock.get(f"{API}/albums/al1").mock(
+            return_value=httpx.Response(
+                200,
+                json={"name": "OK Computer", "tracks": {"items": [SIMPLIFIED_TRACK] * 3}},
+            )
+        )
+        assert len(server.get_album_tracks("al1", limit=2)) == 2
+
+    @respx.mock
+    def test_api_errors_surface_spotifys_reason(self, respx_mock):
         mock_token(respx_mock)
         respx_mock.get(f"{API}/tracks/nope").mock(
-            return_value=httpx.Response(404, json={"error": {"message": "not found"}})
+            return_value=httpx.Response(400, json={"error": {"message": "invalid id"}})
         )
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(ToolError, match="400: invalid id"):
             server.get_track("nope")
+
+    @respx.mock
+    def test_api_errors_without_a_json_body(self, respx_mock):
+        mock_token(respx_mock)
+        respx_mock.get(f"{API}/tracks/t1").mock(
+            return_value=httpx.Response(502, text="<html>Bad Gateway</html>")
+        )
+        with pytest.raises(ToolError, match="502: Bad Gateway"):
+            server.get_track("t1")
 
 
 class TestMCPServer:
@@ -219,6 +253,29 @@ class TestMCPServer:
         async with Client(server.mcp) as client:
             result = await client.call_tool("search_tracks", {"query": "radiohead"})
         assert result.data[0]["name"] == "Paranoid Android"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("limit", [0, 51])
+    async def test_out_of_range_limit_is_rejected_before_calling_spotify(
+        self, limit
+    ):
+        # No respx mock: any HTTP request would fail the test.
+        async with Client(server.mcp) as client:
+            with pytest.raises(ToolError, match="limit"):
+                await client.call_tool(
+                    "search_tracks", {"query": "x", "limit": limit}
+                )
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_spotify_errors_reach_the_client(self, respx_mock):
+        mock_token(respx_mock)
+        respx_mock.get(f"{API}/tracks/nope").mock(
+            return_value=httpx.Response(400, json={"error": {"message": "invalid id"}})
+        )
+        async with Client(server.mcp) as client:
+            with pytest.raises(ToolError, match="invalid id"):
+                await client.call_tool("get_track", {"track_id": "nope"})
 
     @pytest.mark.asyncio
     async def test_missing_credentials_reach_the_client(self, monkeypatch):
