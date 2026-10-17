@@ -1,0 +1,671 @@
+{
+  "run_at": "2026-10-18 07:56:58 CST",
+  "endpoints": {
+    "probes": [
+      {
+        "probe": "search limit=10",
+        "got": "200",
+        "doc_expects": "200"
+      },
+      {
+        "probe": "search limit=50",
+        "got": "200",
+        "doc_expects": "400 (Feb 2026 cap)"
+      },
+      {
+        "probe": "GET /tracks/{id}",
+        "got": "200",
+        "doc_expects": "200"
+      },
+      {
+        "probe": "GET /artists/{id}",
+        "got": "200",
+        "doc_expects": "200"
+      },
+      {
+        "probe": "GET /artists/{id}/albums",
+        "got": "200",
+        "doc_expects": "200"
+      },
+      {
+        "probe": "batch GET /artists?ids",
+        "got": "200",
+        "doc_expects": "403/404 (removed)"
+      },
+      {
+        "probe": "batch GET /tracks?ids",
+        "got": "200",
+        "doc_expects": "403/404 (removed)"
+      },
+      {
+        "probe": "GET /artists/{id}/top-tracks",
+        "got": "200",
+        "doc_expects": "403/404 (removed)"
+      },
+      {
+        "probe": "GET /recommendations",
+        "got": "404 Not Found",
+        "doc_expects": "404 (Nov 2024)"
+      },
+      {
+        "probe": "GET /artists/{id}/related-artists",
+        "got": "404 Not Found",
+        "doc_expects": "404 (Nov 2024)"
+      },
+      {
+        "probe": "GET /audio-features/{id}",
+        "got": "403 None",
+        "doc_expects": "403 (Nov 2024)"
+      },
+      {
+        "probe": "GET /browse/new-releases",
+        "got": "200",
+        "doc_expects": "403/404 (removed)"
+      }
+    ],
+    "fields": {
+      "track.popularity present": true,
+      "track.external_ids.isrc present": true,
+      "track.available_markets present": true,
+      "artist.popularity present": true,
+      "artist.followers present": true,
+      "artist.genres (Radiohead)": [
+        "art rock",
+        "alternative rock"
+      ]
+    }
+  },
+  "playlists": {
+    "app token, public user playlist": {
+      "GET /playlists/{id}": "200",
+      "owner": "62kytpy7jswykfjtnjn9zv3ou",
+      "embedded items returned": 77,
+      "GET /playlists/{id}/tracks": "200",
+      "  items": 5,
+      "GET /playlists/{id}/items": "200",
+      "  items ": 5
+    },
+    "app token, Spotify editorial playlist": {
+      "GET /playlists/{id}": "404 Resource not found",
+      "owner": null,
+      "embedded items returned": 0,
+      "GET /playlists/{id}/tracks": "404 Resource not found",
+      "  items": null,
+      "GET /playlists/{id}/items": "404 Resource not found",
+      "  items ": null
+    },
+    "playlist search: results / null / spotify-owned": "10 / 4 / 0",
+    "user token, own playlist": {
+      "GET /playlists/{id}": "200",
+      "embedded items returned": 42,
+      "GET /playlists/{id}/tracks": "200",
+      "  items": 5,
+      "GET /playlists/{id}/items": "200",
+      "  items ": 5
+    },
+    "user token, someone else's public playlist": {
+      "GET /playlists/{id}": "200",
+      "embedded items returned": 77,
+      "GET /playlists/{id}/tracks": "200",
+      "  items": 5,
+      "GET /playlists/{id}/items": "200",
+      "  items ": 5
+    }
+  },
+  "option_c": {
+    "summary": {
+      "seeds resolved": "20/20",
+      "C1 has collaborators or appears_on": "20/20",
+      "has genres": "19/20",
+      "C2 genre+era search returns tracks": "17/20",
+      "C3 genre artist search returns artists": "9/20",
+      "C4 has own releases": "20/20",
+      "only C4 fires (no C1/C2/C3)": "0/20",
+      "calls": 118,
+      "seconds (sequential)": 18.4
+    },
+    "seeds": [
+      {
+        "seed": "Creep Radiohead",
+        "found": true,
+        "matched": "Creep - Radiohead",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "art rock",
+          "alternative rock"
+        ],
+        "C2 genre+era tracks": 1,
+        "C3 genre artists": 0,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Blinding Lights The Weeknd",
+        "found": true,
+        "matched": "Don't Start Now - Dua Lipa",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "pop"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 10,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Bohemian Rhapsody Queen",
+        "found": true,
+        "matched": "Bohemian Rhapsody - Queen",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "classic rock",
+          "rock",
+          "glam rock"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 10,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Smells Like Teen Spirit Nirvana",
+        "found": true,
+        "matched": "Smells Like Teen Spirit - Nirvana",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 8,
+        "genres": [
+          "grunge",
+          "rock"
+        ],
+        "C2 genre+era tracks": 0,
+        "C3 genre artists": 0,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Lose Yourself Eminem",
+        "found": true,
+        "matched": "Lose Yourself - Eminem",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "rap",
+          "hip hop"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 10,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Redbone Childish Gambino",
+        "found": true,
+        "matched": "Redbone - Childish Gambino",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [],
+        "C2 genre+era tracks": 0,
+        "C3 genre artists": 0,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "One More Time Daft Punk",
+        "found": true,
+        "matched": "One More Time - Daft Punk",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "french house",
+          "electronic",
+          "electro"
+        ],
+        "C2 genre+era tracks": 0,
+        "C3 genre artists": 0,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Strobe deadmau5",
+        "found": true,
+        "matched": "Strobe - Radio Edit - deadmau5",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "edm",
+          "progressive house",
+          "dubstep"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 0,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Take Five Dave Brubeck",
+        "found": true,
+        "matched": "Take Five - The Dave Brubeck Quartet",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "jazz",
+          "cool jazz"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 10,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Clair de Lune Debussy",
+        "found": true,
+        "matched": "Debussy: Suite bergamasque, CD 82, L. 75: III. Clair de lune - Claude Debussy",
+        "C1 co-credited artists": 1,
+        "C1 appears_on releases": 0,
+        "genres": [
+          "impressionism",
+          "classical piano",
+          "classical"
+        ],
+        "C2 genre+era tracks": 3,
+        "C3 genre artists": 0,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Despacito Luis Fonsi",
+        "found": true,
+        "matched": "Despacito - Luis Fonsi",
+        "C1 co-credited artists": 1,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "latin"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 10,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Levitating Dua Lipa",
+        "found": true,
+        "matched": "Levitating (feat. DaBaby) - Dua Lipa",
+        "C1 co-credited artists": 1,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "pop"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 10,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Dynamite BTS",
+        "found": true,
+        "matched": "Dynamite - BTS",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "k-pop"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 3,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Hype Boy NewJeans",
+        "found": true,
+        "matched": "Hype Boy - NewJeans",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 3,
+        "genres": [
+          "k-pop"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 3,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Lemon 米津玄師",
+        "found": true,
+        "matched": "Lemon - Kenshi Yonezu",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 7,
+        "genres": [
+          "j-pop",
+          "anime",
+          "j-rock"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 10,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "晴天 周杰倫",
+        "found": true,
+        "matched": "晴天 - Jay Chou",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "mandopop",
+          "c-pop",
+          "taiwanese pop",
+          "gufeng",
+          "malay pop",
+          "cantopop",
+          "chinese r&b"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 0,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "告白氣球 周杰倫",
+        "found": true,
+        "matched": "告白氣球 - Jay Chou",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "mandopop",
+          "c-pop",
+          "taiwanese pop",
+          "gufeng",
+          "malay pop",
+          "cantopop",
+          "chinese r&b"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 0,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "小幸運 田馥甄",
+        "found": true,
+        "matched": "小幸運 - 電影《我的少女時代》主題曲 - Hebe Tien",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "mandopop",
+          "c-pop",
+          "taiwanese pop",
+          "malay pop"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 0,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "倔強 五月天",
+        "found": true,
+        "matched": "倔強 - Mayday",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "mandopop",
+          "taiwanese pop",
+          "c-pop",
+          "chinese rock",
+          "malay pop"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 0,
+        "C4 own releases": 10
+      },
+      {
+        "seed": "Shape of You Ed Sheeran",
+        "found": true,
+        "matched": "Shape of You - Ed Sheeran",
+        "C1 co-credited artists": 0,
+        "C1 appears_on releases": 10,
+        "genres": [
+          "soft pop"
+        ],
+        "C2 genre+era tracks": 10,
+        "C3 genre artists": 0,
+        "C4 own releases": 10
+      }
+    ]
+  },
+  "option_d": {
+    "summary": {
+      "seeds with ≥1 usable playlist": "10/10",
+      "playlists containing seed track": "24/89",
+      "calls": 109,
+      "seconds (sequential)": 30.7
+    },
+    "seeds": [
+      {
+        "seed": "Creep - Radiohead",
+        "playlists returned": 8,
+        "contain seed track": 3,
+        "contain only seed artist": 1,
+        "candidates (other artists)": 231,
+        "top 5": [
+          "Where Is My Mind? - Pixies",
+          "Zombie - The Cranberries",
+          "Creep - Live - Kelly Clarkson",
+          "Creep - Postmodern Jukebox",
+          "Creep - Kina Grannis"
+        ]
+      },
+      {
+        "seed": "Bohemian Rhapsody - Queen",
+        "playlists returned": 9,
+        "contain seed track": 0,
+        "contain only seed artist": 6,
+        "candidates (other artists)": 148,
+        "top 5": [
+          "Calientita - Reywil Alexander",
+          "Sol, Playa Y Arena - Reywil Alexander",
+          "Bohemian Rhapsody - Panic! At The Disco",
+          "Crazy Little Thing Called Love - Acoustic Version - Maroon 5",
+          "Under Pressure - Shawn Mendes"
+        ]
+      },
+      {
+        "seed": "Lose Yourself - Eminem",
+        "playlists returned": 9,
+        "contain seed track": 1,
+        "contain only seed artist": 5,
+        "candidates (other artists)": 218,
+        "top 5": [
+          "Lose Yourself - Reggae - 888 Collective",
+          "Gangsta's Paradise - Coolio",
+          "Still D.R.E. - Dr. Dre",
+          "Empire State Of Mind - JAŸ-Z",
+          "Thrift Shop (feat. Wanz) - Macklemore & Ryan Lewis"
+        ]
+      },
+      {
+        "seed": "One More Time - Daft Punk",
+        "playlists returned": 9,
+        "contain seed track": 3,
+        "contain only seed artist": 1,
+        "candidates (other artists)": 118,
+        "top 5": [
+          "One More Time (Remix) (As Made Famous by Daft Punk) - Ultimate Pop Hits",
+          "One More Time - Remix - KUJAN",
+          "One More Time - Daft Punk - The Believers in a Dream",
+          "One More Time - Hotblood",
+          "One More Time - Alpha House"
+        ]
+      },
+      {
+        "seed": "Take Five - The Dave Brubeck Quartet",
+        "playlists returned": 10,
+        "contain seed track": 5,
+        "contain only seed artist": 4,
+        "candidates (other artists)": 309,
+        "top 5": [
+          "Lilies Of The Valley - Jun Miyake",
+          "Mo' Better Blues (feat. Terence Blanchard) - Branford Marsalis Quartet",
+          "Sorry - Live in Tivoli - Kyteman",
+          "Hands of Time - Groove Armada",
+          "Blue Train - Remastered 2003/Rudy Van Gelder Edition - John Coltrane"
+        ]
+      },
+      {
+        "seed": "Despacito - Luis Fonsi",
+        "playlists returned": 10,
+        "contain seed track": 3,
+        "contain only seed artist": 3,
+        "candidates (other artists)": 209,
+        "top 5": [
+          "Despacito (Violin Remix) - Viyolin",
+          "Shape of You - Ed Sheeran",
+          "See You Again (feat. Charlie Puth) - Wiz Khalifa",
+          "Uptown Funk (feat. Bruno Mars) - Mark Ronson",
+          "Sugar - Maroon 5"
+        ]
+      },
+      {
+        "seed": "Dynamite - BTS",
+        "playlists returned": 10,
+        "contain seed track": 5,
+        "contain only seed artist": 2,
+        "candidates (other artists)": 198,
+        "top 5": [
+          "Till the End - GiGi Waterproof",
+          "Let's Go - GiGi Waterproof",
+          "Electric Queen - GiGi Waterproof",
+          "Childhood - GiGi Waterproof",
+          "Kamikaze - GiGi Waterproof"
+        ]
+      },
+      {
+        "seed": "Lemon - Kenshi Yonezu",
+        "playlists returned": 7,
+        "contain seed track": 4,
+        "contain only seed artist": 3,
+        "candidates (other artists)": 85,
+        "top 5": [
+          "lemon - yurisa",
+          "Lemon (From \"Unnatural\") - Raon",
+          "Lemon - Cover - TAMURAHARUNA",
+          "Lemon - Live - 叶皓然",
+          "Lemon (Cover) - Ayane"
+        ]
+      },
+      {
+        "seed": "告白氣球 - Jay Chou",
+        "playlists returned": 10,
+        "contain seed track": 0,
+        "contain only seed artist": 4,
+        "candidates (other artists)": 175,
+        "top 5": [
+          "Queen of the Night - Linia Stuart",
+          "Electric Heartbeat - Linia Stuart",
+          "Can You Hear - 劇集 \"白色強人\" 插曲 - Kayee Tam",
+          "說散就散 - JC 陳詠桐",
+          "凉凉 - Aska Yang"
+        ]
+      },
+      {
+        "seed": "倔強 - Mayday",
+        "playlists returned": 7,
+        "contain seed track": 0,
+        "contain only seed artist": 3,
+        "candidates (other artists)": 101,
+        "top 5": [
+          "一翦梅 - Fei Yu-ching",
+          "一場遊戲一場夢 - Dave Wang",
+          "Way Up - 瘦子E.SO",
+          "不是不會痛 - 邱軍",
+          "世紀末寂寞 - icyball 冰球樂團"
+        ]
+      }
+    ]
+  },
+  "e2e": [
+    {
+      "tool": "list_tools",
+      "ok": true,
+      "detail": "8 tools"
+    },
+    {
+      "tool": "search_tracks",
+      "args": {
+        "query": "radiohead",
+        "limit": 3
+      },
+      "ok": true,
+      "detail": "3 item(s)",
+      "seconds": 0.6
+    },
+    {
+      "tool": "search_tracks",
+      "args": {
+        "query": "radiohead",
+        "limit": 20
+      },
+      "ok": true,
+      "detail": "20 item(s)",
+      "seconds": 0.3
+    },
+    {
+      "tool": "search_artists",
+      "args": {
+        "query": "radiohead",
+        "limit": 3
+      },
+      "ok": true,
+      "detail": "3 item(s)",
+      "seconds": 0.3
+    },
+    {
+      "tool": "get_track",
+      "args": {
+        "track_id": "70LcF31zb1H0PyJoS1Sx1r"
+      },
+      "ok": true,
+      "detail": "7 item(s)",
+      "seconds": 0.1
+    },
+    {
+      "tool": "get_artist",
+      "args": {
+        "artist_id": "4Z8W4fKeB5YxbusRsdQVPb"
+      },
+      "ok": true,
+      "detail": "6 item(s)",
+      "seconds": 0.1
+    },
+    {
+      "tool": "get_artist_top_tracks",
+      "args": {
+        "artist_id": "4Z8W4fKeB5YxbusRsdQVPb",
+        "market": "US"
+      },
+      "ok": true,
+      "detail": "10 item(s)",
+      "seconds": 0.1
+    },
+    {
+      "tool": "get_album_tracks",
+      "args": {
+        "album_id": "6dVIqQ8qmQ5GBnJ9shOYGE",
+        "limit": 3
+      },
+      "ok": true,
+      "detail": "3 item(s)",
+      "seconds": 0.1
+    },
+    {
+      "tool": "get_playlist_tracks",
+      "args": {
+        "playlist": "1sKQOPBrwSLv0Ul80U8foE",
+        "limit": 5
+      },
+      "ok": true,
+      "detail": "5 item(s)",
+      "seconds": 0.1
+    },
+    {
+      "tool": "recommend_from_playlist",
+      "args": {
+        "playlist": "1sKQOPBrwSLv0Ul80U8foE",
+        "limit": 5
+      },
+      "ok": true,
+      "detail": "5 item(s)",
+      "seconds": 4.0
+    }
+  ],
+  "totals": {
+    "app calls": 246,
+    "user calls": 8,
+    "429s": 0
+  }
+}
