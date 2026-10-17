@@ -41,9 +41,11 @@ app. So `recommend_from_playlist` builds recommendations from other sources:
 3. **Score candidates.** Each seed votes for its similar artists, with closer matches
    getting more weight. Artists already on the playlist are excluded, and ones sharing a
    Spotify genre with the playlist get a 1.5× boost.
-4. **Keep it diverse.** Each seed can lead to at most (its tracks on the playlist + 1)
-   recommendations, so one dense cluster (for example K-pop, where every artist lists
-   the same peers) can't fill the whole list.
+4. **Keep it diverse.** Seeds take turns: each one's best candidate comes first, then
+   each one's second best, and so on. A seed can lead to at most (its tracks on the
+   playlist + 1) picks. Without this, one dense cluster (for example K-pop, where every
+   artist lists the same peers) takes every top slot, and a short list covers only one
+   style.
 5. **Map back to Spotify.** Each candidate is matched by exact name; ones that only
    fuzzy-match are dropped. Their top tracks in `market` are returned, minus any already
    on the playlist, with `because` listing the seeds that led there.
@@ -246,7 +248,7 @@ and asserts all eight tools register. No secrets are needed — the tests are fu
 
 ```
 server.py       the MCP server (eight tools + token caching)
-test_server.py  36 tests, all offline
+test_server.py  37 tests, all offline
 pyproject.toml  deps and pytest config, managed by uv
 ```
 
