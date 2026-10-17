@@ -7,9 +7,12 @@ secret -- no user login. That means catalog data only; anything user-specific
 
 import os
 import time
+from typing import Annotated
 
 import httpx
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
+from pydantic import Field
 
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 API_BASE = "https://api.spotify.com/v1"
@@ -18,6 +21,32 @@ mcp = FastMCP("Spotify")
 
 _token: str | None = None
 _token_expires_at: float = 0.0
+
+# Spotify rejects page sizes outside 1-50 with a bare 400, so bound them up front.
+Limit = Annotated[int, Field(ge=1, le=50)]
+
+
+def _raise_for_status(resp: httpx.Response) -> None:
+    """Raise a ToolError carrying Spotify's own explanation of a failed request.
+
+    A ToolError reaches the client verbatim and is logged without a traceback,
+    unlike the generic "400 Bad Request" an HTTPStatusError would produce.
+    """
+    if resp.is_success:
+        return
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {}
+    # The token endpoint uses OAuth's flat shape; the Web API nests it.
+    error = body.get("error")
+    if isinstance(error, dict):
+        detail = error.get("message")
+    else:
+        detail = body.get("error_description") or error
+    raise ToolError(
+        f"Spotify returned {resp.status_code}: {detail or resp.reason_phrase}"
+    )
 
 
 def _get_token() -> str:
@@ -30,7 +59,7 @@ def _get_token() -> str:
     client_id = os.environ.get("SPOTIFY_CLIENT_ID")
     client_secret = os.environ.get("SPOTIFY_CLIENT_SECRET")
     if not client_id or not client_secret:
-        raise RuntimeError(
+        raise ToolError(
             "Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET "
             "(create an app at https://developer.spotify.com/dashboard)"
         )
@@ -41,7 +70,7 @@ def _get_token() -> str:
         auth=(client_id, client_secret),
         timeout=10,
     )
-    resp.raise_for_status()
+    _raise_for_status(resp)
     payload = resp.json()
 
     _token = payload["access_token"]
@@ -58,20 +87,28 @@ def _api(path: str, **params) -> dict:
         params=params,
         timeout=10,
     )
-    resp.raise_for_status()
+    _raise_for_status(resp)
     return resp.json()
 
 
-def _track_summary(track: dict) -> dict:
-    return {
+def _track_summary(track: dict, album: str | None = None) -> dict:
+    """Summarise a full or simplified track.
+
+    Simplified tracks (an album's track list) carry neither an album nor a
+    popularity, so the caller passes the album name and popularity is left out
+    rather than reported as null.
+    """
+    summary = {
         "id": track["id"],
         "name": track["name"],
         "artists": [a["name"] for a in track["artists"]],
-        "album": track.get("album", {}).get("name"),
+        "album": album or track.get("album", {}).get("name"),
         "duration_ms": track["duration_ms"],
-        "popularity": track.get("popularity"),
         "url": track["external_urls"]["spotify"],
     }
+    if "popularity" in track:
+        summary["popularity"] = track["popularity"]
+    return summary
 
 
 def _artist_summary(artist: dict) -> dict:
@@ -86,14 +123,14 @@ def _artist_summary(artist: dict) -> dict:
 
 
 @mcp.tool
-def search_tracks(query: str, limit: int = 10) -> list[dict]:
+def search_tracks(query: str, limit: Limit = 10) -> list[dict]:
     """Search Spotify for tracks matching a free-text query."""
     data = _api("/search", q=query, type="track", limit=limit)
     return [_track_summary(t) for t in data["tracks"]["items"]]
 
 
 @mcp.tool
-def search_artists(query: str, limit: int = 10) -> list[dict]:
+def search_artists(query: str, limit: Limit = 10) -> list[dict]:
     """Search Spotify for artists matching a free-text query."""
     data = _api("/search", q=query, type="artist", limit=limit)
     return [_artist_summary(a) for a in data["artists"]["items"]]
@@ -119,10 +156,13 @@ def get_artist_top_tracks(artist_id: str, market: str = "US") -> list[dict]:
 
 
 @mcp.tool
-def get_album_tracks(album_id: str, limit: int = 50) -> list[dict]:
+def get_album_tracks(album_id: str, limit: Limit = 50) -> list[dict]:
     """List the tracks on an album by its Spotify album ID."""
-    data = _api(f"/albums/{album_id}/tracks", limit=limit)
-    return [_track_summary(t) for t in data["items"]]
+    # The album endpoint embeds the first 50 tracks alongside the album's name,
+    # which the bare /tracks endpoint omits.
+    album = _api(f"/albums/{album_id}")
+    tracks = album["tracks"]["items"][:limit]
+    return [_track_summary(t, album=album["name"]) for t in tracks]
 
 
 if __name__ == "__main__":
