@@ -5,9 +5,9 @@ A minimal [FastMCP](https://gofastmcp.com) server exposing Spotify's catalog as 
 [![CI](https://github.com/yennanliu/SpotifyMCP-V3/actions/workflows/ci.yml/badge.svg)](https://github.com/yennanliu/SpotifyMCP-V3/actions/workflows/ci.yml)
 
 **Phase 1** uses Spotify's Client Credentials flow: app-level auth, no user login, no
-redirect URI, no token storage on disk. That covers public catalog data. User-specific
-features (playback control, playlists, saved library) need the Authorization Code flow
-and are out of scope here.
+redirect URI, no token storage on disk. That covers public catalog data and public
+playlists. User-specific features (playback control, private playlists, saved library)
+need the Authorization Code flow and are out of scope here.
 
 ## Tools
 
@@ -19,10 +19,41 @@ and are out of scope here.
 | `get_artist(artist_id)` | One artist's details |
 | `get_artist_top_tracks(artist_id, market="US")` | An artist's top tracks |
 | `get_album_tracks(album_id, limit=50)` | An album's track list |
+| `get_playlist_tracks(playlist, limit=100)` | A public playlist's tracks (URL, URI or ID; up to 500) |
+| `recommend_from_playlist(playlist, limit=20, market="US", tracks_per_artist=1)` | Tracks by artists similar to a playlist's |
 
 Responses are flattened to small summary dicts rather than Spotify's raw payloads, so
 image arrays and pagination cursors stay out of the model's context. `limit` must be
 1–50, Spotify's own page-size cap; out-of-range values are rejected before any request.
+
+## How recommendations work
+
+Spotify closed `/recommendations`, `/artists/{id}/related-artists` and
+`/audio-features` to new apps in November 2024, and they return 404 or 403 for this
+app. So `recommend_from_playlist` builds recommendations from other sources:
+
+1. **Read the playlist.** Its artists are the seeds, weighted by how many tracks each has
+   on it. The 20 most frequent are used.
+2. **Find similar artists** for each seed from [Deezer](https://developers.deezer.com/api)
+   (free, no key needed) and, if `LASTFM_API_KEY` is set,
+   [Last.fm](https://www.last.fm/api/show/artist.getSimilar). A source that is down is
+   skipped; the other still contributes.
+3. **Score candidates.** Each seed votes for its similar artists, with closer matches
+   getting more weight. Artists already on the playlist are excluded, and ones sharing a
+   Spotify genre with the playlist get a 1.5× boost.
+4. **Keep it diverse.** Each seed can lead to at most (its tracks on the playlist + 1)
+   recommendations, so one dense cluster (for example K-pop, where every artist lists
+   the same peers) can't fill the whole list.
+5. **Map back to Spotify.** Each candidate is matched by exact name; ones that only
+   fuzzy-match are dropped. Their top tracks in `market` are returned, minus any already
+   on the playlist, with `because` listing the seeds that led there.
+
+A 77-track playlist takes about 8 seconds, making roughly 100 HTTP calls run six at a
+time. Deezer's API is for non-commercial use; check its terms before shipping this
+commercially.
+
+To add Last.fm as a second source, get a free key at https://www.last.fm/api/account/create
+and pass it alongside the Spotify credentials (`-e LASTFM_API_KEY=...`).
 
 ## Setup
 
@@ -170,7 +201,7 @@ with Developer mode, on the web.
    - **Connection:** *Server URL*, set to the tunnel URL **with `/mcp` appended**
    - **Authentication:** *No authentication*
    - Tick the box acknowledging that custom MCP servers carry risk, then click **Create**.
-     ChatGPT should list the six tools.
+     ChatGPT should list the eight tools.
 5. In a new chat, click **+**, choose **Developer mode**, and turn the connector on.
    ChatGPT asks you to approve each tool call.
 
@@ -185,7 +216,7 @@ Things to know:
 ## Example prompts
 
 These work in any MCP host (Claude Code, Claude Desktop or ChatGPT). Together they cover
-all six tools and the error paths.
+all eight tools and the error paths.
 
 | Prompt | Exercises |
 | --- | --- |
@@ -198,22 +229,24 @@ all six tools and the error paths.
 | *找周杰倫最熱門的 3 首歌，並列出每首歌所屬的專輯。* | Non-ASCII queries, chained calls |
 | *Find Daft Punk's most popular track, then show me the rest of the album it's on.* | Multi-step: search → top tracks → album |
 | *Look up track `notarealid`.* | Error path: should report `Spotify returned 400: Invalid base62 id` |
+| *What's on this playlist? https://open.spotify.com/playlist/1sKQOPBrwSLv0Ul80U8foE* | `get_playlist_tracks` |
+| *Recommend 15 songs like this playlist, for Taiwan: https://open.spotify.com/playlist/1sKQOPBrwSLv0Ul80U8foE* | `recommend_from_playlist` with `market` |
 | *Search for 100 tracks by Taylor Swift.* | `limit` above 50: ChatGPT should either cap it at 50 or relay the validation error |
 
-Playback, playlists and "my library" prompts are expected to fail, because Phase 1 only
-has access to the public catalog.
+Playback, "save this as a playlist" and "my library" prompts are expected to fail,
+because Phase 1 only has access to the public catalog and public playlists.
 
 ## CI
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the test suite on Python
 3.12 and 3.13 for every push to `main` and every pull request, then boots the server
-and asserts all six tools register. No secrets are needed — the tests are fully mocked.
+and asserts all eight tools register. No secrets are needed — the tests are fully mocked.
 
 ## Layout
 
 ```
-server.py       the MCP server (six tools + token caching)
-test_server.py  22 tests, all offline
+server.py       the MCP server (eight tools + token caching)
+test_server.py  36 tests, all offline
 pyproject.toml  deps and pytest config, managed by uv
 ```
 
@@ -221,5 +254,5 @@ pyproject.toml  deps and pytest config, managed by uv
 
 - Authorization Code flow for user-scoped access
 - Playback control (play, pause, skip, transfer device)
-- Playlist read and write
-- Recommendations and audio features
+- Write recommendations back as a new playlist (needs user login)
+- Cache similar-artist lookups across calls
