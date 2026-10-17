@@ -362,8 +362,9 @@ class TestRecommendations:
 
         picks = server.recommend_from_playlist(PLAYLIST, limit=3)
 
-        # NMIXX is 2nd of aespa's 2 (0.5); ITZY is 3rd of IVE's 3 (0.33).
-        assert [p["artists"] for p in picks] == [["LE SSERAFIM"], ["NMIXX"], ["ITZY"]]
+        # NMIXX (0.5) outscores ITZY (0.33), but aespa already led to LE SSERAFIM,
+        # so IVE's best pick takes its turn first.
+        assert [p["artists"] for p in picks] == [["LE SSERAFIM"], ["ITZY"], ["NMIXX"]]
         assert picks[0]["because"] == ["aespa", "IVE"]
         assert picks[0]["id"] == "LE SSERAFIM-1"
 
@@ -412,6 +413,29 @@ class TestRecommendations:
             ["Mariya Takeuchi"],
             ["NMIXX"],
         ]
+
+    @respx.mock
+    def test_a_short_list_spans_the_playlists_styles(self, respx_mock):
+        mock_token(respx_mock)
+        # IVE has three tracks, so its neighbours outscore Night Tempo's.
+        mock_playlist(
+            respx_mock,
+            [
+                track("t1", "IVE"),
+                track("t2", "IVE"),
+                track("t3", "IVE"),
+                track("t4", "Night Tempo"),
+            ],
+        )
+        mock_deezer(
+            respx_mock,
+            {"IVE": ["ITZY", "NMIXX", "aespa"], "Night Tempo": ["Mariya Takeuchi"]},
+        )
+        mock_spotify_artists(respx_mock)
+
+        picks = server.recommend_from_playlist(PLAYLIST, limit=2)
+
+        assert [p["artists"] for p in picks] == [["ITZY"], ["Mariya Takeuchi"]]
 
     @respx.mock
     def test_skips_top_tracks_already_on_the_playlist(self, respx_mock):

@@ -16,6 +16,7 @@ import time
 import unicodedata
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from itertools import zip_longest
 from typing import Annotated
 
 import httpx
@@ -330,52 +331,53 @@ def recommend_from_playlist(
         hits = _api("/search", q=names[key], type="artist", limit=5)["artists"]["items"]
         return next((a for a in hits if _normalize(a["name"]) == key), None)
 
-    # Resolve extra candidates: some names won't be on Spotify, and the
-    # diversity cap below skips others.
+    lead = {key: v.most_common(1)[0][0] for key, v in votes.items()}
+
+    def spread(scores: dict[str, float]) -> list[str]:
+        """Order candidates so the playlist's artists take turns.
+
+        Ranking purely by score lets one dense cluster (say, K-pop, where every
+        artist lists the same peers) take every top slot, so a short list covers
+        one style. Instead take each lead seed's best candidate, then each one's
+        second best, and so on. A seed leads at most its track count + 1 picks.
+        """
+        groups: dict[str, list[str]] = defaultdict(list)
+        for key in sorted(scores, key=scores.get, reverse=True):
+            if len(groups[lead[key]]) <= seeds[lead[key]]:
+                groups[lead[key]].append(key)
+        return [key for turn in zip_longest(*groups.values()) for key in turn if key]
+
+    # Resolve extra candidates: some names won't be on Spotify.
     wanted = -(-limit // tracks_per_artist)
-    ranked = sorted(votes, key=lambda k: sum(votes[k].values()), reverse=True)
-    candidates = ranked[: wanted * 3]
+    totals = {key: sum(v.values()) for key, v in votes.items()}
+    candidates = spread(totals)[: wanted * 2]
     with ThreadPoolExecutor(max_workers=6) as pool:
         artists = list(pool.map(resolve, candidates))
 
-    scored = []
+    scores, artist_of = {}, {}
     for key, artist in zip(candidates, artists):
         if artist is None:
             continue
-        score = sum(votes[key].values())
-        if playlist_genres.intersection(artist.get("genres", [])):
-            score *= 1.5
-        scored.append((score, key, artist))
-    scored.sort(key=lambda r: r[0], reverse=True)
-
-    # Without a cap, one dense cluster (say, K-pop, where every artist lists the
-    # same peers) fills the whole list. Each playlist artist may lead to as many
-    # recommendations as it has tracks on the playlist, plus one.
-    chosen, led = [], Counter()
-    for score, key, artist in scored:
-        lead = votes[key].most_common(1)[0][0]
-        if led[lead] > seeds[lead]:
-            continue
-        led[lead] += 1
-        chosen.append((score, key, artist))
-        if len(chosen) == wanted:
-            break
+        shares_genre = playlist_genres.intersection(artist.get("genres", []))
+        scores[key] = totals[key] * (1.5 if shares_genre else 1)
+        artist_of[key] = artist
+    chosen = spread(scores)[:wanted]
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         top_tracks = pool.map(
             lambda a: _api(f"/artists/{a['id']}/top-tracks", market=market)["tracks"],
-            [artist for _, _, artist in chosen],
+            [artist_of[key] for key in chosen],
         )
     on_playlist_ids = {t["id"] for t in tracks}
     picks = []
-    for (score, key, _), top in zip(chosen, top_tracks):
+    for key, top in zip(chosen, top_tracks):
         fresh = [t for t in top if t["id"] not in on_playlist_ids]
         for track in fresh[:tracks_per_artist]:
             picks.append(
                 {
                     **_track_summary(track),
                     "because": [seed for seed, _ in votes[key].most_common(3)],
-                    "score": round(score, 2),
+                    "score": round(scores[key], 2),
                 }
             )
     return picks[:limit]
