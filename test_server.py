@@ -293,6 +293,44 @@ class TestTools:
         with pytest.raises(ToolError, match="502: Bad Gateway"):
             server.get_track("t1")
 
+    @respx.mock
+    def test_waits_out_a_rate_limit_and_retries(self, respx_mock, monkeypatch):
+        mock_token(respx_mock)
+        sleeps = []
+        monkeypatch.setattr(server.time, "sleep", sleeps.append)
+        respx_mock.get(f"{API}/tracks/t1").mock(
+            side_effect=[
+                httpx.Response(429, headers={"Retry-After": "2"}),
+                httpx.Response(200, json=TRACK),
+            ]
+        )
+        assert server.get_track("t1")["name"] == "Paranoid Android"
+        assert sleeps == [2]
+
+    @respx.mock
+    def test_gives_up_after_repeated_rate_limits(self, respx_mock, monkeypatch):
+        mock_token(respx_mock)
+        sleeps = []
+        monkeypatch.setattr(server.time, "sleep", sleeps.append)
+        respx_mock.get(f"{API}/tracks/t1").mock(
+            return_value=httpx.Response(429, headers={"Retry-After": "1"})
+        )
+        with pytest.raises(ToolError, match="rate limit exceeded; try again in 1"):
+            server.get_track("t1")
+        assert sleeps == [1] * server.MAX_RETRIES
+
+    @respx.mock
+    def test_does_not_wait_out_a_long_rate_limit(self, respx_mock, monkeypatch):
+        mock_token(respx_mock)
+        sleeps = []
+        monkeypatch.setattr(server.time, "sleep", sleeps.append)
+        respx_mock.get(f"{API}/tracks/t1").mock(
+            return_value=httpx.Response(429, headers={"Retry-After": "120"})
+        )
+        with pytest.raises(ToolError, match="try again in 120 seconds"):
+            server.get_track("t1")
+        assert sleeps == []
+
 
 class TestPlaylists:
     @pytest.mark.parametrize(
@@ -447,6 +485,62 @@ class TestRecommendations:
         [pick] = server.recommend_from_playlist(PLAYLIST, limit=1)
 
         assert pick["id"] == "ITZY-2"
+
+    @respx.mock
+    def test_skips_features_led_by_a_playlist_artist(self, respx_mock):
+        mock_token(respx_mock)
+        mock_playlist(respx_mock, [track("t1", "IVE")])
+        mock_deezer(respx_mock, {"IVE": ["ITZY"]})
+        # ITZY's top track is a feature that IVE leads.
+        feature = {**track("f1", "IVE"), "artists": [
+            {"name": "IVE", "id": "id-IVE"}, {"name": "ITZY", "id": "id-ITZY"}
+        ]}
+        respx_mock.get(f"{API}/artists/id-ITZY/top-tracks").mock(
+            return_value=httpx.Response(
+                200, json={"tracks": [feature, track("ITZY-2", "ITZY")]}
+            )
+        )
+        mock_spotify_artists(respx_mock)
+
+        [pick] = server.recommend_from_playlist(PLAYLIST, limit=1)
+
+        assert pick["id"] == "ITZY-2"
+
+    @respx.mock
+    def test_a_duet_counts_against_every_credited_artist(self, respx_mock):
+        mock_token(respx_mock)
+        mock_playlist(respx_mock, [track("t1", "IVE")])
+        mock_deezer(respx_mock, {"IVE": ["ITZY", "NMIXX"]})
+        # NMIXX's top track is a duet led by ITZY, who is already picked.
+        duet = {**track("d1", "ITZY"), "artists": [
+            {"name": "ITZY", "id": "id-ITZY"}, {"name": "NMIXX", "id": "id-NMIXX"}
+        ]}
+        respx_mock.get(f"{API}/artists/id-NMIXX/top-tracks").mock(
+            return_value=httpx.Response(
+                200, json={"tracks": [duet, track("NMIXX-2", "NMIXX")]}
+            )
+        )
+        mock_spotify_artists(respx_mock)
+
+        picks = server.recommend_from_playlist(PLAYLIST, limit=2)
+
+        assert [p["id"] for p in picks] == ["ITZY-1", "NMIXX-2"]
+
+    @respx.mock
+    def test_backfills_when_a_candidate_has_nothing_fresh(self, respx_mock):
+        mock_token(respx_mock)
+        mock_playlist(respx_mock, [track("t1", "IVE")])
+        mock_deezer(respx_mock, {"IVE": ["ITZY", "NMIXX"]})
+        # Every ITZY top track is led by IVE, so NMIXX must fill the slot.
+        feature = {**track("f1", "IVE"), "artists": [{"name": "IVE", "id": "id-IVE"}]}
+        respx_mock.get(f"{API}/artists/id-ITZY/top-tracks").mock(
+            return_value=httpx.Response(200, json={"tracks": [feature]})
+        )
+        mock_spotify_artists(respx_mock)
+
+        [pick] = server.recommend_from_playlist(PLAYLIST, limit=1)
+
+        assert pick["artists"] == ["NMIXX"]
 
     @respx.mock
     def test_falls_back_to_lastfm_when_deezer_is_down(self, respx_mock, monkeypatch):

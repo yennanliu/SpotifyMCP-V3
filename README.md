@@ -47,12 +47,16 @@ app. So `recommend_from_playlist` builds recommendations from other sources:
    artist lists the same peers) takes every top slot, and a short list covers only one
    style.
 5. **Map back to Spotify.** Each candidate is matched by exact name; ones that only
-   fuzzy-match are dropped. Their top tracks in `market` are returned, minus any already
-   on the playlist, with `because` listing the seeds that led there.
+   fuzzy-match are dropped. Their top tracks in `market` are returned, with `because`
+   listing the seeds that led there. A track is skipped if it is already on the playlist,
+   if any artist credited on it is on the playlist (top tracks are often features led by
+   someone else), or if any credited artist already has `tracks_per_artist` picks. When
+   that leaves the list short, the next-ranked candidates fill it.
 
-A 77-track playlist takes about 8 seconds, making roughly 100 HTTP calls run six at a
-time. Deezer's API is for non-commercial use; check its terms before shipping this
-commercially.
+A 77-track playlist takes about 6 seconds, making roughly 100 HTTP calls run six at a
+time. If Spotify rate-limits a call (HTTP 429), the server waits for the `Retry-After`
+time and retries, up to 3 times, unless the wait is over 30 seconds. Deezer's API is for
+non-commercial use; check its terms before shipping this commercially.
 
 To add Last.fm as a second source, get a free key at https://www.last.fm/api/account/create
 and pass it alongside the Spotify credentials (`-e LASTFM_API_KEY=...`).
@@ -248,7 +252,7 @@ and asserts all eight tools register. No secrets are needed — the tests are fu
 
 ```
 server.py       the MCP server (eight tools + token caching)
-test_server.py  37 tests, all offline
+test_server.py  43 tests, all offline
 pyproject.toml  deps and pytest config, managed by uv
 ```
 
