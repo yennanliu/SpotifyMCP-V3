@@ -33,6 +33,10 @@ LASTFM_API = "https://ws.audioscrobbler.com/2.0/"
 # Each seed costs one or two external calls, so this bounds a recommendation's cost.
 MAX_SEEDS = 20
 
+# How often, and for how long at most, to wait out a 429 before giving up.
+MAX_RETRIES = 3
+MAX_RETRY_WAIT = 30
+
 mcp = FastMCP("Spotify")
 
 _token: str | None = None
@@ -96,13 +100,30 @@ def _get_token() -> str:
 
 
 def _api(path: str, **params) -> dict:
-    """GET a Spotify API path and return the decoded JSON body."""
-    resp = httpx.get(
-        f"{API_BASE}{path}",
-        headers={"Authorization": f"Bearer {_get_token()}"},
-        params=params,
-        timeout=10,
-    )
+    """GET a Spotify API path and return the decoded JSON body.
+
+    Spotify rate-limits over a rolling 30-second window and answers 429 with a
+    Retry-After header. A recommendation makes ~100 calls, so back-to-back ones
+    hit it; wait as told and retry rather than failing the whole tool call.
+    """
+    for attempt in range(MAX_RETRIES + 1):
+        resp = httpx.get(
+            f"{API_BASE}{path}",
+            headers={"Authorization": f"Bearer {_get_token()}"},
+            params=params,
+            timeout=10,
+        )
+        if resp.status_code != 429:
+            break
+        try:
+            wait = int(resp.headers.get("Retry-After", "1"))
+        except ValueError:
+            wait = 1
+        if attempt == MAX_RETRIES or wait > MAX_RETRY_WAIT:
+            raise ToolError(
+                f"Spotify rate limit exceeded; try again in {wait} seconds."
+            )
+        time.sleep(wait)
     _raise_for_status(resp)
     return resp.json()
 
@@ -361,27 +382,59 @@ def recommend_from_playlist(
         shares_genre = playlist_genres.intersection(artist.get("genres", []))
         scores[key] = totals[key] * (1.5 if shares_genre else 1)
         artist_of[key] = artist
-    chosen = spread(scores)[:wanted]
-
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        top_tracks = pool.map(
-            lambda a: _api(f"/artists/{a['id']}/top-tracks", market=market)["tracks"],
-            [artist_of[key] for key in chosen],
-        )
     on_playlist_ids = {t["id"] for t in tracks}
-    picks = []
-    for key, top in zip(chosen, top_tracks):
-        fresh = [t for t in top if t["id"] not in on_playlist_ids]
-        for track in fresh[:tracks_per_artist]:
-            picks.append(
-                {
-                    **_track_summary(track),
-                    "because": [seed for seed, _ in votes[key].most_common(3)],
-                    "score": round(scores[key], 2),
-                }
-            )
-    return picks[:limit]
+    on_playlist_artist_ids = {a["id"] for t in tracks for a in t["artists"]}
+    picked = Counter()  # picks so far per credited artist ID
 
+    def pick_tracks(chosen: list[str], top_tracks) -> list[dict]:
+        """Up to tracks_per_artist fresh tracks from each candidate's top tracks.
+
+        A candidate's top track is often a duet or feature led by someone else,
+        who may be on the playlist or already picked, so every credited artist
+        is checked, not just the candidate.
+        """
+        picks = []
+        for key, top in zip(chosen, top_tracks):
+            taken = 0
+            for track in top:
+                if taken == tracks_per_artist:
+                    break
+                credited = track["artists"]
+                if (
+                    track["id"] in on_playlist_ids
+                    or any(a["id"] in on_playlist_artist_ids for a in credited)
+                    or any(_normalize(a["name"]) in on_playlist for a in credited)
+                    or any(picked[a["id"]] >= tracks_per_artist for a in credited)
+                ):
+                    continue
+                picked.update(a["id"] for a in credited)
+                taken += 1
+                picks.append(
+                    {
+                        **_track_summary(track),
+                        "because": [seed for seed, _ in votes[key].most_common(3)],
+                        "score": round(scores[key], 2),
+                    }
+                )
+        return picks
+
+    # Fetch top tracks a batch at a time: the filter can leave a candidate with
+    # nothing, and the next batch then backfills the list.
+    ranked = spread(scores)
+    picks = []
+    for start in range(0, len(ranked), wanted):
+        if len(picks) >= limit:
+            break
+        chosen = ranked[start : start + wanted]
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            top_tracks = pool.map(
+                lambda a: _api(f"/artists/{a['id']}/top-tracks", market=market)[
+                    "tracks"
+                ],
+                [artist_of[key] for key in chosen],
+            )
+        picks += pick_tracks(chosen, top_tracks)
+    return picks[:limit]
 
 if __name__ == "__main__":
     mcp.run()
